@@ -9,6 +9,7 @@ import os
 from dotenv import load_dotenv
 from functools import wraps
 import asyncio
+from telegram_bot import TelegramBot
 
 # .env 파일 로드
 load_dotenv()
@@ -124,10 +125,16 @@ class HybridTradingBot:
             'futures_taker': 0.0004, # 선물 taker 0.04%
         }
         
+        # 텔레그램 봇 초기화
+        self.telegram_bot = TelegramBot()
+        
         logger.info(f"하이브리드 트레이딩 봇 초기화 완료")
         logger.info(f"현물 잔고: {self.spot_balance:.2f} USDT")
         logger.info(f"선물 잔고: {self.futures_balance:.2f} USDT")
         logger.info(f"총 시작 자금: {self.initial_balance:.2f} USDT")
+        
+        # 시작 알림
+        self.telegram_bot.send_startup_message()
     
     @retry_on_network_error()
     def get_spot_balance(self) -> float:
@@ -297,6 +304,16 @@ class HybridTradingBot:
                 order = self.spot_exchange.create_market_sell_order(symbol, amount)
                 
             logger.info(f"현물 거래 실행: {side} {amount:.6f} {symbol} @ {price:.2f}")
+            
+            # 텔레그램 알림
+            self.telegram_bot.send_trade_notification({
+                'symbol': symbol,
+                'side': side,
+                'amount': amount,
+                'price': price,
+                'type': 'spot'
+            })
+            
             return order
             
         except Exception as e:
@@ -316,6 +333,16 @@ class HybridTradingBot:
                 order = self.futures_exchange.create_market_sell_order(symbol, amount)
                 
             logger.info(f"선물 거래 실행: {side} {amount:.6f} {symbol} @ {price:.2f} (레버리지: {leverage}x)")
+            
+            # 텔레그램 알림
+            self.telegram_bot.send_trade_notification({
+                'symbol': symbol,
+                'side': side,
+                'amount': amount,
+                'price': price,
+                'type': 'futures'
+            })
+            
             return order
             
         except Exception as e:
@@ -598,9 +625,11 @@ class HybridTradingBot:
                 
             except KeyboardInterrupt:
                 logger.info("전략 중단됨")
+                self.telegram_bot.send_shutdown_message()
                 break
             except Exception as e:
                 logger.error(f"전략 실행 중 오류 발생: {e}")
+                self.telegram_bot.send_error_alert(str(e), "STRATEGY_ERROR")
                 time.sleep(60)  # 오류 발생 시 1분 대기
     
     def report_performance(self) -> None:
@@ -629,6 +658,14 @@ class HybridTradingBot:
             profitable_trades = sum(1 for trade in self.trade_history if trade['pnl'] > 0)
             win_rate = (profitable_trades / len(self.trade_history)) * 100
             logger.info(f"승률: {win_rate:.1f}% ({profitable_trades}/{len(self.trade_history)})")
+        
+        # 성과 보고 텔레그램 알림
+        self.telegram_bot.send_balance_update({
+            'current_balance': total_balance,
+            'initial_balance': self.initial_balance,
+            'spot_balance': current_spot_balance,
+            'futures_balance': current_futures_balance
+        })
         
         logger.info("=" * 50)
 
