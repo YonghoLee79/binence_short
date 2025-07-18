@@ -1,0 +1,81 @@
+# Core trading libraries
+ccxt>=4.0.0
+pandas>=2.0.0
+numpy>=1.24.0
+TA-Lib>=0.4.26
+
+# Machine Learning
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Data visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Web scraping and APIs
+requests>=2.31.0
+aiohttp>=3.8.0
+beautifulsoup4>=4.12.0
+
+# Natural Language Processing
+textblob>=0.17.0
+nltk>=3.8.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+
+# Web framework (for dashboard)
+flask>=2.3.0
+
+# Async support
+asyncio-mqtt>=0.11.0
+
+# Logging and monitoring
+loguru>=0.7.0
+
+# Data storage
+sqlite3
+
+# Time and date handling
+python-dateutil>=2.8.0
+
+# Statistical analysis
+scipy>=1.11.0
+
+# Progress bars
+tqdm>=4.66.0
+
+# Configuration management
+configparser>=5.3.0
+
+# Error handling and retries
+tenacity>=8.2.0
+
+# Cryptography (for secure key handling)
+cryptography>=41.0.0
+
+# JSON handling
+ujson>=5.8.0
+
+# Performance monitoring
+psutil>=5.9.0
+
+# Database operations
+sqlalchemy>=2.0.0
+
+# Caching
+redis>=4.6.0
+
+# Queue management
+celery>=5.3.0
+
+# Process management
+supervisor>=4.2.0
+
+# System monitoring
+prometheus-client>=0.17.0
+
+# Testing frameworks
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
