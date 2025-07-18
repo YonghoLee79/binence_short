@@ -20,21 +20,24 @@ def main():
     print("\n실행 옵션을 선택하세요:")
     print("1. 기본 트레이딩 봇 (모듈화 버전)")
     print("2. 비동기 최적화 트레이딩 봇")
-    print("3. 모니터링 대시보드만 실행")
-    print("4. 단위 테스트 실행")
-    print("5. 데이터베이스 테스트")
+    print("3. 하이브리드 포트폴리오 봇 v2 (현물+선물)")
+    print("4. 모니터링 대시보드만 실행")
+    print("5. 단위 테스트 실행")
+    print("6. 데이터베이스 테스트")
     
-    choice = input("\n선택 (1-5): ").strip()
+    choice = input("\n선택 (1-6): ").strip()
     
     if choice == "1":
         run_basic_bot()
     elif choice == "2":
         run_async_bot()
     elif choice == "3":
-        run_dashboard()
+        run_hybrid_bot_v2()
     elif choice == "4":
-        run_tests()
+        run_dashboard()
     elif choice == "5":
+        run_tests()
+    elif choice == "6":
         run_database_test()
     else:
         print("잘못된 선택입니다.")
@@ -63,6 +66,16 @@ def run_async_bot():
         asyncio.run(async_main())
     except Exception as e:
         print(f"❌ 비동기 봇 실행 실패: {e}")
+
+def run_hybrid_bot_v2():
+    """하이브리드 포트폴리오 봇 v2 실행"""
+    print("\n💎 하이브리드 포트폴리오 봇 v2 실행 중...")
+    print("📊 현물 + 선물 통합 전략")
+    try:
+        from hybrid_trading_bot_v2 import main as hybrid_main
+        asyncio.run(hybrid_main())
+    except Exception as e:
+        print(f"❌ 하이브리드 봇 실행 실패: {e}")
 
 def run_dashboard():
     """모니터링 대시보드 실행"""
