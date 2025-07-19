@@ -3,15 +3,47 @@
 텔레그램 알림 모듈
 """
 
-import sys
 import os
-from pathlib import Path
-
-# 프로젝트 루트를 Python 경로에 추가
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from telegram_bot import TelegramBot
+import requests
+from typing import Optional
 from utils import logger
+
+
+class TelegramBot:
+    """텔레그램 봇 클래스"""
+    
+    def __init__(self):
+        self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
+        self.chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        self.enabled = bool(self.bot_token and self.chat_id)
+        
+        if not self.enabled:
+            logger.warning("텔레그램 봇 토큰 또는 채팅 ID가 설정되지 않았습니다")
+    
+    def send_message(self, message: str) -> bool:
+        """텔레그램 메시지 전송"""
+        if not self.enabled:
+            return False
+        
+        try:
+            url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+            data = {
+                'chat_id': self.chat_id,
+                'text': message,
+                'parse_mode': 'HTML'
+            }
+            
+            response = requests.post(url, data=data, timeout=10)
+            
+            if response.status_code == 200:
+                return True
+            else:
+                logger.error(f"텔레그램 메시지 전송 실패: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"텔레그램 메시지 전송 오류: {e}")
+            return False
 
 
 class TelegramNotifications:
