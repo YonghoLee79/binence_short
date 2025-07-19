@@ -26,10 +26,10 @@ class HybridPortfolioStrategy:
         self.spot_allocation = config.get('spot_allocation', 0.6)  # 현물 60%
         self.futures_allocation = config.get('futures_allocation', 0.4)  # 선물 40%
         
-        # 전략 설정
-        self.arbitrage_threshold = config.get('arbitrage_threshold', 0.002)  # 0.2% 프리미엄
-        self.rebalance_threshold = config.get('rebalance_threshold', 0.05)  # 5% 편차시 리밸런싱
-        self.max_leverage = config.get('max_leverage', 3)  # 최대 3배 레버리지
+        # 전략 설정 (수익률 최적화)
+        self.arbitrage_threshold = config.get('arbitrage_threshold', 0.001)  # 0.1% 프리미엄 (더 민감하게)
+        self.rebalance_threshold = config.get('rebalance_threshold', 0.03)  # 3% 편차시 리밸런싱 (더 빈번하게)
+        self.max_leverage = config.get('max_leverage', 5)  # 최대 5배 레버리지 (수익률 증대)
         
         # 리스크 관리
         self.max_position_size = config.get('max_position_size', 0.2)  # 단일 포지션 최대 20%
@@ -60,8 +60,25 @@ class HybridPortfolioStrategy:
                 spot_price = data.get('spot_ticker', {}).get('last', 0)
                 futures_price = data.get('futures_ticker', {}).get('last', 0)
                 
+                # Null 체크 및 타입 검증
+                if spot_price is None:
+                    spot_price = 0
+                if futures_price is None:
+                    futures_price = 0
+                
+                # 숫자가 아닌 경우 0으로 설정
+                try:
+                    spot_price = float(spot_price)
+                    futures_price = float(futures_price)
+                except (TypeError, ValueError):
+                    spot_price = 0
+                    futures_price = 0
+                
                 if spot_price <= 0 or futures_price <= 0:
+                    logger.debug(f"[DEBUG] 가격 데이터 부족으로 스킵: {symbol} - spot: {spot_price}, futures: {futures_price}")
                     continue
+                
+                logger.debug(f"[DEBUG] 처리 중인 심볼: {symbol} - spot: {spot_price}, futures: {futures_price}")
                 
                 # 1. 아비트라지 기회 분석
                 premium = (futures_price - spot_price) / spot_price
@@ -80,12 +97,29 @@ class HybridPortfolioStrategy:
                 spot_signals = data.get('spot_signals', {})
                 futures_signals = data.get('futures_signals', {})
                 
+                # 시그널 강도 초기화 (범위 밖에서도 사용되므로)
+                spot_strength = 0
+                futures_strength = 0
+                
                 if spot_signals and futures_signals:
                     spot_strength = spot_signals.get('combined_signal', 0)
                     futures_strength = futures_signals.get('combined_signal', 0)
                     
-                    # 현물과 선물 신호가 같은 방향이면 트렌드 추종
-                    if abs(spot_strength) > 0.3 and abs(futures_strength) > 0.3:
+                    # Null 체크 및 타입 검증
+                    if spot_strength is None:
+                        spot_strength = 0
+                    if futures_strength is None:
+                        futures_strength = 0
+                    
+                    try:
+                        spot_strength = float(spot_strength)
+                        futures_strength = float(futures_strength)
+                    except (TypeError, ValueError):
+                        spot_strength = 0
+                        futures_strength = 0
+                    
+                    # 현물과 선물 신호가 같은 방향이면 트렌드 추종 (더 민감하게)
+                    if abs(spot_strength) > 0.2 and abs(futures_strength) > 0.2:
                         if (spot_strength > 0 and futures_strength > 0) or (spot_strength < 0 and futures_strength < 0):
                             opportunities['trend_following'].append({
                                 'symbol': symbol,
@@ -95,11 +129,11 @@ class HybridPortfolioStrategy:
                                 'confidence': (abs(spot_strength) + abs(futures_strength)) / 2
                             })
                 
-                # 3. 헤징 기회 (현물 보유시 선물로 헤지)
+                # 3. 헤징 기회 (현물 보유시 선물로 헤지) - 더 민감하게
                 current_spot_position = self.current_positions['spot'].get(symbol, {})
-                if current_spot_position and abs(futures_strength) > 0.5:
-                    if (current_spot_position.get('side') == 'buy' and futures_strength < -0.5) or \
-                       (current_spot_position.get('side') == 'sell' and futures_strength > 0.5):
+                if current_spot_position and abs(futures_strength) > 0.3:
+                    if (current_spot_position.get('side') == 'buy' and futures_strength < -0.3) or \
+                       (current_spot_position.get('side') == 'sell' and futures_strength > 0.3):
                         opportunities['hedging'].append({
                             'symbol': symbol,
                             'hedge_type': 'protective_short' if current_spot_position.get('side') == 'buy' else 'protective_long',
@@ -116,8 +150,21 @@ class HybridPortfolioStrategy:
                     spot_rsi = spot_indicators.get('rsi', {}).get('current', 50)
                     futures_rsi = futures_indicators.get('rsi', {}).get('current', 50)
                     
-                    # RSI 극값에서 모멘텀 기회
-                    if (spot_rsi < 30 and futures_rsi < 30) or (spot_rsi > 70 and futures_rsi > 70):
+                    # Null 체크 및 타입 검증
+                    if spot_rsi is None:
+                        spot_rsi = 50
+                    if futures_rsi is None:
+                        futures_rsi = 50
+                    
+                    try:
+                        spot_rsi = float(spot_rsi)
+                        futures_rsi = float(futures_rsi)
+                    except (TypeError, ValueError):
+                        spot_rsi = 50
+                        futures_rsi = 50
+                    
+                    # RSI 극값에서 모멘텀 기회 (더 민감하게)
+                    if (spot_rsi < 35 and futures_rsi < 35) or (spot_rsi > 65 and futures_rsi > 65):
                         opportunities['momentum'].append({
                             'symbol': symbol,
                             'type': 'oversold_bounce' if spot_rsi < 30 else 'overbought_correction',

@@ -24,9 +24,9 @@ class Config:
     
     # 거래 설정
     INITIAL_BALANCE = 1000.0  # 초기 자금
-    SPOT_ALLOCATION = 0.6     # 현물 할당 60%
-    FUTURES_ALLOCATION = 0.4  # 선물 할당 40%
-    REBALANCE_THRESHOLD = 0.08  # 리밸런싱 임계값 8%
+    SPOT_ALLOCATION = 0.4     # 현물 할당 40% (수익률 최적화)
+    FUTURES_ALLOCATION = 0.6  # 선물 할당 60% (레버리지 활용)
+    REBALANCE_THRESHOLD = 0.05  # 리밸런싱 임계값 5% (더 빈번한 리밸런싱)
     
     # 거래 심볼 (바이낸스에서 현재 활발히 거래되는 안정적인 메이저 코인들만)
     TRADING_SYMBOLS = [
