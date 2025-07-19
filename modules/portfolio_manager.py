@@ -77,11 +77,12 @@ class PortfolioManager:
         try:
             total_value = 0.0
             
-            # 현물 잔고
+            # 현물 잔고 (설정된 거래 심볼들만 처리)
             for symbol, amount in spot_balance.get('total', {}).items():
                 if symbol == 'USDT':
                     total_value += amount
-                else:
+                elif f"{symbol}/USDT" in self.trading_symbols:
+                    # 설정된 거래 심볼만 처리
                     ticker = self.exchange.get_ticker(f"{symbol}/USDT", 'spot')
                     if ticker.get('last'):
                         total_value += amount * ticker['last']
@@ -104,9 +105,10 @@ class PortfolioManager:
         try:
             self.positions.clear()
             
-            # 현물 포지션
+            # 현물 포지션 (설정된 거래 심볼들만 처리)
             for symbol, amount in spot_balance.get('total', {}).items():
-                if amount > 0 and symbol != 'USDT':
+                if amount > 0 and symbol != 'USDT' and f"{symbol}/USDT" in self.trading_symbols:
+                    # 설정된 거래 심볼만 처리
                     ticker = self.exchange.get_ticker(f"{symbol}/USDT", 'spot')
                     self.positions[f"{symbol}/USDT"] = {
                         'symbol': f"{symbol}/USDT",
