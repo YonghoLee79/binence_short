@@ -213,64 +213,112 @@ class TechnicalAnalyzer:
             signals = {}
             
             # RSI 신호
-            if 'rsi' in indicators:
-                rsi_current = indicators['rsi'][-1] if len(indicators['rsi']) > 0 else 50
+            if 'rsi' in indicators and len(indicators['rsi']) > 0:
+                rsi_current = indicators['rsi'].iloc[-1] if hasattr(indicators['rsi'], 'iloc') else indicators['rsi'][-1]
+                
+                # NaN 또는 무효한 값 처리
+                if pd.isna(rsi_current) or not isinstance(rsi_current, (int, float)):
+                    rsi_current = 50
+                
                 if rsi_current < self.rsi_oversold:
                     signals['rsi_signal'] = 1.0  # 매수
                 elif rsi_current > self.rsi_overbought:
                     signals['rsi_signal'] = -1.0  # 매도
                 else:
                     signals['rsi_signal'] = 0.0  # 중립
+            else:
+                signals['rsi_signal'] = 0.0
             
             # MACD 신호
-            if 'macd' in indicators:
+            if 'macd' in indicators and 'histogram' in indicators['macd']:
                 macd_hist = indicators['macd']['histogram']
                 if len(macd_hist) >= 2:
-                    if macd_hist[-1] > 0 and macd_hist[-2] <= 0:
+                    hist_current = macd_hist.iloc[-1] if hasattr(macd_hist, 'iloc') else macd_hist[-1]
+                    hist_prev = macd_hist.iloc[-2] if hasattr(macd_hist, 'iloc') else macd_hist[-2]
+                    
+                    # NaN 또는 무효한 값 처리
+                    if pd.isna(hist_current) or pd.isna(hist_prev):
+                        signals['macd_signal'] = 0.0
+                    elif hist_current > 0 and hist_prev <= 0:
                         signals['macd_signal'] = 1.0  # 매수
-                    elif macd_hist[-1] < 0 and macd_hist[-2] >= 0:
+                    elif hist_current < 0 and hist_prev >= 0:
                         signals['macd_signal'] = -1.0  # 매도
                     else:
                         signals['macd_signal'] = 0.0  # 중립
+                else:
+                    signals['macd_signal'] = 0.0
+            else:
+                signals['macd_signal'] = 0.0
             
             # 볼린저 밴드 신호
             if 'bb' in indicators:
                 bb_data = indicators['bb']
-                if len(bb_data['lower']) > 0 and len(bb_data['upper']) > 0:
-                    current_price = bb_data['middle'][-1]
-                    upper_band = bb_data['upper'][-1]
-                    lower_band = bb_data['lower'][-1]
+                if (len(bb_data.get('lower', [])) > 0 and 
+                    len(bb_data.get('upper', [])) > 0 and 
+                    len(bb_data.get('middle', [])) > 0):
                     
-                    if current_price <= lower_band:
+                    current_price = bb_data['middle'].iloc[-1] if hasattr(bb_data['middle'], 'iloc') else bb_data['middle'][-1]
+                    upper_band = bb_data['upper'].iloc[-1] if hasattr(bb_data['upper'], 'iloc') else bb_data['upper'][-1]
+                    lower_band = bb_data['lower'].iloc[-1] if hasattr(bb_data['lower'], 'iloc') else bb_data['lower'][-1]
+                    
+                    # NaN 또는 무효한 값 처리
+                    if pd.isna(current_price) or pd.isna(upper_band) or pd.isna(lower_band):
+                        signals['bb_signal'] = 0.0
+                    elif current_price <= lower_band:
                         signals['bb_signal'] = 1.0  # 매수
                     elif current_price >= upper_band:
                         signals['bb_signal'] = -1.0  # 매도
                     else:
                         signals['bb_signal'] = 0.0  # 중립
+                else:
+                    signals['bb_signal'] = 0.0
+            else:
+                signals['bb_signal'] = 0.0
             
             # 스토캐스틱 신호
-            if 'stoch' in indicators:
+            if 'stoch' in indicators and 'slowk' in indicators['stoch']:
                 stoch_data = indicators['stoch']
                 if len(stoch_data['slowk']) > 0:
-                    slowk = stoch_data['slowk'][-1]
-                    if slowk < 20:
+                    slowk = stoch_data['slowk'].iloc[-1] if hasattr(stoch_data['slowk'], 'iloc') else stoch_data['slowk'][-1]
+                    
+                    # NaN 또는 무효한 값 처리
+                    if pd.isna(slowk) or not isinstance(slowk, (int, float)):
+                        signals['stoch_signal'] = 0.0
+                    elif slowk < 20:
                         signals['stoch_signal'] = 1.0  # 매수
                     elif slowk > 80:
                         signals['stoch_signal'] = -1.0  # 매도
                     else:
                         signals['stoch_signal'] = 0.0  # 중립
+                else:
+                    signals['stoch_signal'] = 0.0
+            else:
+                signals['stoch_signal'] = 0.0
             
-            # 종합 신호 계산
-            signal_values = [v for v in signals.values() if v != 0]
-            if signal_values:
-                signals['combined_signal'] = sum(signal_values) / len(signal_values)
+            # 종합 신호 계산 - 모든 신호 포함하여 평균 계산
+            valid_signals = [v for k, v in signals.items() if k.endswith('_signal') and isinstance(v, (int, float)) and not pd.isna(v)]
+            
+            if valid_signals:
+                signals['combined_signal'] = sum(valid_signals) / len(valid_signals)
             else:
                 signals['combined_signal'] = 0.0
+            
+            # 안전 검증: 모든 신호가 유효한 숫자인지 확인
+            for key, value in signals.items():
+                if pd.isna(value) or not isinstance(value, (int, float)):
+                    signals[key] = 0.0
             
             return signals
         except Exception as e:
             logger.error(f"신호 생성 오류: {e}")
-            return {'combined_signal': 0.0}
+            # 완전히 안전한 기본 신호 반환
+            return {
+                'rsi_signal': 0.0,
+                'macd_signal': 0.0,
+                'bb_signal': 0.0,
+                'stoch_signal': 0.0,
+                'combined_signal': 0.0
+            }
     
     def get_market_strength(self, indicators: Dict[str, Any]) -> Dict[str, float]:
         """시장 강도 분석"""

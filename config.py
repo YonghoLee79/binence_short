@@ -28,10 +28,20 @@ class Config:
     FUTURES_ALLOCATION = 0.4  # 선물 할당 40%
     REBALANCE_THRESHOLD = 0.08  # 리밸런싱 임계값 8%
     
-    # 거래 심볼
+    # 거래 심볼 (바이낸스에서 현재 활발히 거래되는 안정적인 메이저 코인들만)
     TRADING_SYMBOLS = [
-        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT',
-        'DOT/USDT', 'MATIC/USDT', 'AVAX/USDT', 'LINK/USDT', 'UNI/USDT'
+        'BTC/USDT',   # 비트코인
+        'ETH/USDT',   # 이더리움
+        'BNB/USDT',   # 바이낸스 코인
+        'XRP/USDT',   # 리플
+        'SOL/USDT',   # 솔라나
+        'ADA/USDT',   # 카르다노
+        'AVAX/USDT',  # 아발란체
+        'LINK/USDT',  # 체인링크
+        'DOT/USDT',   # 폴카닷
+        'MATIC/USDT', # 폴리곤
+        'LTC/USDT',   # 라이트코인
+        'TRX/USDT'    # 트론
     ]
     
     # 수수료 설정

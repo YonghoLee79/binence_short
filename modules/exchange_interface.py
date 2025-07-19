@@ -45,10 +45,43 @@ class ExchangeInterface:
                 }
             })
             
+            # 사용 가능한 심볼 목록 캐시
+            self._available_symbols = {'spot': set(), 'future': set()}
+            self._load_available_symbols()
+            
             logger.info("거래소 연결 설정 완료")
         except Exception as e:
             logger.error(f"거래소 연결 설정 실패: {e}")
             raise
+    
+    def _load_available_symbols(self):
+        """사용 가능한 심볼 목록 로드"""
+        try:
+            # 현물 심볼 로드
+            if self.spot_exchange:
+                spot_markets = self.spot_exchange.load_markets()
+                self._available_symbols['spot'] = set(spot_markets.keys())
+                logger.info(f"현물 심볼 {len(self._available_symbols['spot'])}개 로드됨")
+            
+            # 선물 심볼 로드
+            if self.futures_exchange:
+                futures_markets = self.futures_exchange.load_markets()
+                self._available_symbols['future'] = set(futures_markets.keys())
+                logger.info(f"선물 심볼 {len(self._available_symbols['future'])}개 로드됨")
+                
+        except Exception as e:
+            logger.error(f"심볼 목록 로드 실패: {e}")
+            # 실패 시 빈 set 유지
+    
+    def _is_symbol_available(self, symbol: str, exchange_type: str) -> bool:
+        """심볼이 해당 거래소에서 사용 가능한지 확인"""
+        try:
+            if exchange_type not in self._available_symbols:
+                return False
+            return symbol in self._available_symbols[exchange_type]
+        except Exception:
+            # 확인할 수 없으면 True 반환 (기존 동작 유지)
+            return True
     
     @retry_on_network_error(max_retries=3)
     @rate_limit(calls_per_second=0.5)
@@ -107,6 +140,12 @@ class ExchangeInterface:
         """심볼 가격 정보 조회"""
         try:
             exchange = self.spot_exchange if exchange_type == 'spot' else self.futures_exchange
+            
+            # 심볼 유효성 검사
+            if not self._is_symbol_available(symbol, exchange_type):
+                logger.warning(f"심볼이 존재하지 않음: {symbol} ({exchange_type})")
+                return {}
+            
             ticker = exchange.fetch_ticker(symbol)
             return {
                 'symbol': symbol,
@@ -118,6 +157,9 @@ class ExchangeInterface:
                 'percentage': ticker['percentage'],
                 'timestamp': ticker['timestamp']
             }
+        except ccxt.BadSymbol as e:
+            logger.warning(f"잘못된 심볼: {symbol} ({exchange_type}) - {e}")
+            return {}
         except Exception as e:
             logger.error(f"가격 정보 조회 실패 ({symbol}): {e}")
             return {}
@@ -145,13 +187,26 @@ class ExchangeInterface:
         """캔들 데이터 조회"""
         try:
             exchange = self.spot_exchange if exchange_type == 'spot' else self.futures_exchange
+            
+            # 심볼 유효성 검사
+            if not self._is_symbol_available(symbol, exchange_type):
+                logger.warning(f"심볼이 존재하지 않음: {symbol} ({exchange_type})")
+                return pd.DataFrame()
+            
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            
+            if not ohlcv:
+                logger.warning(f"OHLCV 데이터가 비어있음: {symbol}")
+                return pd.DataFrame()
             
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             
             return df
+        except ccxt.BadSymbol as e:
+            logger.warning(f"잘못된 심볼: {symbol} ({exchange_type}) - {e}")
+            return pd.DataFrame()
         except Exception as e:
             logger.error(f"캔들 데이터 조회 실패 ({symbol}): {e}")
             return pd.DataFrame()
