@@ -28,7 +28,7 @@ class Config:
     FUTURES_ALLOCATION = 0.6  # 선물 할당 60% (레버리지 활용)
     REBALANCE_THRESHOLD = 0.05  # 리밸런싱 임계값 5% (더 빈번한 리밸런싱)
     
-    # 거래 심볼 (바이낸스에서 현재 활발히 거래되는 안정적인 메이저 코인들만)
+    # 거래 심볼 (현물과 선물 모두 지원되는 메이저 코인만)
     TRADING_SYMBOLS = [
         'BTC/USDT',   # 비트코인
         'ETH/USDT',   # 이더리움
@@ -38,9 +38,9 @@ class Config:
         'ADA/USDT',   # 카르다노
         'AVAX/USDT',  # 아발란체
         'LINK/USDT',  # 체인링크
-        'DOT/USDT',   # 폴카닷
-        'MATIC/USDT', # 폴리곤
-        'LTC/USDT',   # 라이트코인
+        'DOT/USDT',   # 폴카닷 (선물 제외)
+        'MATIC/USDT', # 폴리곤 (현재 문제 발생)
+        # 'LTC/USDT',   # 라이트코인 (선물 문제로 제외)
         'TRX/USDT'    # 트론
     ]
     
@@ -104,17 +104,17 @@ class Config:
         }
     
     def get_hybrid_config(self):
-        """하이브리드 전략 설정 반환"""
+        """하이브리드 전략 설정 반환 (적극적 거래)"""
         return {
             'spot_allocation': self.SPOT_ALLOCATION,
             'futures_allocation': self.FUTURES_ALLOCATION,
-            'arbitrage_threshold': 0.003,   # 아비트라지 임계값 0.3%
+            'arbitrage_threshold': 0.0005,  # 아비트라지 임계값 0.05% (초민감)
             'rebalance_threshold': self.REBALANCE_THRESHOLD,
-            'max_leverage': 3,
-            'max_position_size': 0.15,      # 단일 포지션 최대 15%
+            'max_leverage': 5,              # 레버리지 증가
+            'max_position_size': 0.2,       # 단일 포지션 최대 20%
             'correlation_limit': 0.75,
-            'trend_threshold': 0.6,         # 트렌드 신호 임계값
-            'momentum_threshold': 0.8,      # 모멘텀 신호 임계값
+            'trend_threshold': 0.3,         # 트렌드 신호 임계값 (더 민감)
+            'momentum_threshold': 0.5,      # 모멘텀 신호 임계값 (더 민감)
             'hedge_ratio': 0.8,             # 헤지 비율 80%
             'rebalance_interval_hours': 12  # 리밸런싱 간격 12시간
         }

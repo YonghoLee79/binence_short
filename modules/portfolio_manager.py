@@ -447,6 +447,23 @@ class PortfolioManager:
             logger.error(f"현재 배분 조회 실패: {e}")
             return {'spot': 0, 'futures': 0}
     
+    def _get_current_prices(self) -> Dict[str, float]:
+        """현재 가격 정보 조회"""
+        try:
+            prices = {}
+            for symbol in self.trading_symbols:
+                try:
+                    ticker = self.exchange.get_ticker(symbol, 'spot')
+                    if ticker and ticker.get('last'):
+                        prices[symbol] = ticker['last']
+                except Exception as e:
+                    logger.warning(f"가격 조회 실패 ({symbol}): {e}")
+                    prices[symbol] = 0
+            return prices
+        except Exception as e:
+            logger.error(f"현재 가격 조회 실패: {e}")
+            return {}
+    
     def _execute_rebalance_action(self, action: Dict[str, Any]) -> bool:
         """리밸런싱 액션 실행"""
         try:
@@ -481,24 +498,57 @@ class PortfolioManager:
     def get_portfolio_summary(self) -> Dict[str, Any]:
         """포트폴리오 요약 정보"""
         try:
-            current_balance = self.get_current_balance()
+            # 실제 거래소 잔고 조회
+            spot_balance = self.exchange.get_spot_balance()
+            futures_balance = self.exchange.get_futures_balance()
+            
+            # 현재 포트폴리오 가치 계산
+            current_balance = self._calculate_portfolio_value(spot_balance, futures_balance, [])
+            
+            # 현물과 선물 잔고 분리
+            spot_usdt = spot_balance.get('total', {}).get('USDT', 0)
+            futures_usdt = futures_balance.get('total', {}).get('USDT', 0)
+            total_balance = spot_usdt + futures_usdt
+            
             allocation = self._get_current_allocation()
             
             return {
+                'total_balance': total_balance,
                 'current_balance': current_balance,
+                'spot_balance': spot_usdt,
+                'futures_balance': futures_usdt,
+                'spot_free_balance': spot_balance.get('free', {}).get('USDT', 0),
+                'futures_free_balance': futures_balance.get('free', {}).get('USDT', 0),
                 'initial_balance': self.initial_balance,
                 'total_pnl': current_balance - self.initial_balance,
-                'total_pnl_pct': (current_balance - self.initial_balance) / self.initial_balance * 100,
+                'total_pnl_pct': (current_balance - self.initial_balance) / self.initial_balance * 100 if self.initial_balance > 0 else 0,
                 'allocation': allocation,
                 'positions': len(self.positions),
                 'trades': len(self.trade_history),
                 'performance_metrics': self.performance_metrics,
-                'last_updated': datetime.now()
+                'last_updated': datetime.now(),
+                'current_prices': self._get_current_prices()
             }
             
         except Exception as e:
             logger.error(f"포트폴리오 요약 정보 조회 실패: {e}")
-            return {}
+            return {
+                'total_balance': self.initial_balance,
+                'current_balance': self.initial_balance,
+                'spot_balance': self.initial_balance * self.spot_allocation,
+                'futures_balance': self.initial_balance * self.futures_allocation,
+                'spot_free_balance': self.initial_balance * self.spot_allocation,
+                'futures_free_balance': self.initial_balance * self.futures_allocation,
+                'initial_balance': self.initial_balance,
+                'total_pnl': 0,
+                'total_pnl_pct': 0,
+                'allocation': {'spot': self.spot_allocation, 'futures': self.futures_allocation},
+                'positions': 0,
+                'trades': 0,
+                'performance_metrics': {},
+                'last_updated': datetime.now(),
+                'current_prices': {}
+            }
     
     def get_position_details(self) -> List[Dict[str, Any]]:
         """포지션 상세 정보"""

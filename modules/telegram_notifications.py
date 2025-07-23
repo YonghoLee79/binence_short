@@ -223,6 +223,200 @@ class TelegramNotifications:
         except Exception as e:
             logger.error(f"일일 요약 알림 전송 실패: {e}")
     
+    def send_trading_cycle_log(self, cycle_info: dict):
+        """실시간 거래 사이클 로그 전송"""
+        if not self.enabled:
+            return
+        
+        try:
+            cycle_num = cycle_info.get('cycle_number', 0)
+            duration = cycle_info.get('duration', 0)
+            opportunities = cycle_info.get('opportunities', {})
+            trades_executed = cycle_info.get('trades_executed', 0)
+            
+            # 기회 발견 상황 요약
+            opp_summary = []
+            for strategy, count in opportunities.items():
+                if count > 0:
+                    emoji_map = {
+                        'arbitrage': '🔀',
+                        'trend_following': '📈', 
+                        'hedging': '🛡️',
+                        'momentum': '⚡'
+                    }
+                    opp_summary.append(f"{emoji_map.get(strategy, '📊')} {strategy}: {count}개")
+            
+            if not opp_summary:
+                opp_text = "❌ 기회 없음"
+            else:
+                opp_text = "\n".join(opp_summary)
+            
+            # 거래 실행 상태
+            trade_emoji = "💰" if trades_executed > 0 else "⏳"
+            
+            message = f"""
+🔄 <b>거래 사이클 #{cycle_num}</b>
+
+⏱️ 실행 시간: {duration:.1f}초
+📊 거래 기회:
+{opp_text}
+
+{trade_emoji} 실행된 거래: {trades_executed}개
+📅 시간: {__import__('datetime').datetime.now().strftime('%H:%M:%S')}
+
+<i>사이클 완료</i>
+            """.strip()
+            
+            self.telegram.send_message(message)
+            
+        except Exception as e:
+            logger.error(f"거래 사이클 로그 전송 실패: {e}")
+    
+    def send_market_analysis_log(self, analysis_info: dict):
+        """시장 분석 로그 전송"""
+        if not self.enabled:
+            return
+        
+        try:
+            symbols_count = analysis_info.get('symbols_analyzed', 0)
+            top_signals = analysis_info.get('top_signals', [])
+            market_condition = analysis_info.get('market_condition', 'neutral')
+            
+            condition_emoji = {
+                'bullish': '🐂',
+                'bearish': '🐻', 
+                'neutral': '📊',
+                'volatile': '⚡'
+            }.get(market_condition, '📊')
+            
+            message = f"""
+📈 <b>시장 분석 리포트</b>
+
+📊 분석 심볼: {symbols_count}개
+{condition_emoji} 시장 상황: {market_condition.title()}
+
+🎯 주요 신호:
+"""
+            
+            if top_signals:
+                for signal in top_signals[:3]:  # 상위 3개만
+                    symbol = signal.get('symbol', 'N/A')
+                    strategy = signal.get('strategy', 'N/A')
+                    confidence = signal.get('confidence', 0) * 100
+                    message += f"• {symbol}: {strategy} ({confidence:.0f}%)\n"
+            else:
+                message += "• 현재 유효한 신호 없음\n"
+            
+            message += f"\n📅 {__import__('datetime').datetime.now().strftime('%H:%M:%S')}"
+            
+            self.telegram.send_message(message)
+            
+        except Exception as e:
+            logger.error(f"시장 분석 로그 전송 실패: {e}")
+    
+    def send_performance_log(self, performance_info: dict):
+        """성과 로그 전송 (시간별)"""
+        if not self.enabled:
+            return
+        
+        try:
+            current_balance = performance_info.get('current_balance', 0)
+            hourly_pnl = performance_info.get('hourly_pnl', 0)
+            hourly_pnl_pct = performance_info.get('hourly_pnl_pct', 0)
+            total_trades = performance_info.get('total_trades', 0)
+            win_rate = performance_info.get('win_rate', 0)
+            
+            pnl_emoji = "💚" if hourly_pnl >= 0 else "❤️"
+            
+            message = f"""
+💎 <b>시간별 성과 리포트</b>
+
+💰 현재 잔고: ${current_balance:,.2f}
+{pnl_emoji} 시간 손익: ${hourly_pnl:+,.2f} ({hourly_pnl_pct:+.2f}%)
+📊 총 거래: {total_trades}회
+🎯 승률: {win_rate:.1f}%
+
+📅 {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}
+
+<i>성과 추적 중...</i>
+            """.strip()
+            
+            self.telegram.send_message(message)
+            
+        except Exception as e:
+            logger.error(f"성과 로그 전송 실패: {e}")
+    
+    def send_opportunity_alert(self, opportunity_info: dict):
+        """거래 기회 발견 즉시 알림"""
+        if not self.enabled:
+            return
+        
+        try:
+            strategy = opportunity_info.get('strategy', 'unknown')
+            symbol = opportunity_info.get('symbol', 'N/A')
+            confidence = opportunity_info.get('confidence', 0) * 100
+            expected_return = opportunity_info.get('expected_return', 0) * 100
+            
+            strategy_emoji = {
+                'arbitrage': '🔀',
+                'trend_following': '📈',
+                'hedging': '🛡️', 
+                'momentum': '⚡'
+            }.get(strategy, '📊')
+            
+            message = f"""
+🚨 <b>거래 기회 발견!</b>
+
+{strategy_emoji} 전략: {strategy.replace('_', ' ').title()}
+💎 심볼: {symbol}
+🎯 신뢰도: {confidence:.0f}%
+💰 예상 수익: {expected_return:.2f}%
+
+⏰ 발견 시간: {__import__('datetime').datetime.now().strftime('%H:%M:%S')}
+
+<i>거래 검토 중...</i>
+            """.strip()
+            
+            self.telegram.send_message(message)
+            logger.info(f"거래 기회 알림 전송: {strategy} - {symbol}")
+            
+        except Exception as e:
+            logger.error(f"거래 기회 알림 전송 실패: {e}")
+    
+    def send_error_log(self, error_info: dict):
+        """오류 로그 전송"""
+        if not self.enabled:
+            return
+        
+        try:
+            error_type = error_info.get('type', 'unknown')
+            error_message = error_info.get('message', 'No details')
+            severity = error_info.get('severity', 'medium')
+            
+            severity_emoji = {
+                'low': '🟡',
+                'medium': '🟠',
+                'high': '🔴', 
+                'critical': '🚨'
+            }.get(severity, '🟠')
+            
+            message = f"""
+{severity_emoji} <b>시스템 오류</b>
+
+⚠️ 유형: {error_type.replace('_', ' ').title()}
+📝 메시지: {error_message}
+🔧 심각도: {severity.upper()}
+
+📅 발생 시간: {__import__('datetime').datetime.now().strftime('%H:%M:%S')}
+
+<i>오류 처리 중...</i>
+            """.strip()
+            
+            self.telegram.send_message(message)
+            
+        except Exception as e:
+            logger.error(f"오류 로그 전송 실패: {e}")
+    
     def send_shutdown_message(self):
         """봇 종료 알림"""
         if not self.enabled:

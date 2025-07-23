@@ -43,14 +43,14 @@ class HybridTradingBotV2:
         # 컴포넌트 초기화
         self._initialize_components()
         
-        # 하이브리드 전략 초기화
+        # 하이브리드 전략 초기화 (매우 적극적 설정)
         hybrid_config = {
             'spot_allocation': self.config.SPOT_ALLOCATION,
             'futures_allocation': self.config.FUTURES_ALLOCATION,
-            'arbitrage_threshold': 0.003,  # 0.3% 프리미엄
-            'rebalance_threshold': 0.08,   # 8% 편차시 리밸런싱
-            'max_leverage': 3,
-            'max_position_size': 0.15,     # 단일 포지션 최대 15%
+            'arbitrage_threshold': 0.0005,  # 0.05% 프리미엄 (매우 민감하게)
+            'rebalance_threshold': 0.03,    # 3% 편차시 리밸런싱
+            'max_leverage': 5,              # 레버리지 증가
+            'max_position_size': 0.2,       # 단일 포지션 최대 20%
             'correlation_limit': 0.75
         }
         self.hybrid_strategy = HybridPortfolioStrategy(hybrid_config)
@@ -251,26 +251,34 @@ class HybridTradingBotV2:
                         self._send_trade_notification(trade_result, order)
             
             # 전략 신호 생성
-            signals = self.hybrid_strategy.generate_portfolio_signals(opportunities, portfolio_state)
+            signals = self.hybrid_strategy.generate_portfolio_signals(opportunities, portfolio_state, market_data)
             
             # 신호 실행
-            for signal in signals[:5]:  # 최대 5개까지만
+            self.logger.info(f"생성된 신호 수: {len(signals)}개")
+            for i, signal in enumerate(signals[:5]):  # 최대 5개까지만
+                self.logger.info(f"신호 #{i+1}: {signal['symbol']} {signal['action']} "
+                               f"({signal['exchange_type']}) - 신뢰도: {signal.get('confidence', 0):.2f}")
+                
                 # 리스크 검증
+                current_price = market_data.get(signal['symbol'], {}).get(f"{signal['exchange_type']}_ticker", {}).get('last', 0)
                 risk_check = self.risk_manager.validate_trade(
                     symbol=signal['symbol'],
                     side=signal['action'],
                     size=signal['size'],
-                    price=market_data.get(signal['symbol'], {}).get(f"{signal['exchange_type']}_ticker", {}).get('last', 0),
+                    price=current_price,
                     current_balance=portfolio_state['current_balance'],
                     exchange_type=signal['exchange_type']
                 )
                 
                 if risk_check['is_valid']:
+                    self.logger.info(f"리스크 검증 통과: {signal['symbol']} - 거래 실행 중...")
                     # 거래 실행
                     trade_result = self._execute_trade(signal)
                     if trade_result and trade_result.get('success'):
                         executed_trades.append(trade_result)
                         self._send_trade_notification(trade_result, signal)
+                        self.logger.info(f"거래 성공: {signal['symbol']} {signal['action']} "
+                                       f"{signal['size']} @ ${current_price}")
                         
                         # 포지션 업데이트
                         self.hybrid_strategy.update_positions(
@@ -278,6 +286,8 @@ class HybridTradingBotV2:
                             signal['exchange_type'], 
                             trade_result
                         )
+                    else:
+                        self.logger.warning(f"거래 실행 실패: {signal['symbol']} - {trade_result}")
                 else:
                     self.logger.warning(f"리스크 검증 실패: {signal['symbol']} - {risk_check['errors']}")
             
@@ -318,10 +328,14 @@ class HybridTradingBotV2:
                 if result.get('pnl', 0) > 0:
                     self.performance_metrics['successful_trades'] += 1
                 
-                self.performance_metrics['win_rate'] = (
-                    self.performance_metrics['successful_trades'] / 
-                    self.performance_metrics['total_trades'] * 100
-                )
+                # 0 나누기 방지
+                if self.performance_metrics['total_trades'] > 0:
+                    self.performance_metrics['win_rate'] = (
+                        self.performance_metrics['successful_trades'] / 
+                        self.performance_metrics['total_trades'] * 100
+                    )
+                else:
+                    self.performance_metrics['win_rate'] = 0.0
                 
                 self.logger.info(f"거래 실행 성공: {signal['strategy']} - {signal['symbol']} {signal['action']}")
             
@@ -426,6 +440,130 @@ class HybridTradingBotV2:
         except Exception as e:
             self.logger.error(f"일일 요약 전송 실패: {e}")
     
+    def _send_cycle_log(self, market_data: Dict[str, Any], executed_trades: List[Dict], cycle_duration: float):
+        """실시간 거래 사이클 로그 전송"""
+        try:
+            # 기회 발견 현황 분석
+            opportunities = self.hybrid_strategy.analyze_market_opportunity(market_data)
+            opp_counts = {
+                'arbitrage': len(opportunities.get('arbitrage', [])),
+                'trend_following': len(opportunities.get('trend_following', [])),
+                'hedging': len(opportunities.get('hedging', [])),
+                'momentum': len(opportunities.get('momentum', []))
+            }
+            
+            cycle_info = {
+                'cycle_number': self.cycle_count,
+                'duration': cycle_duration,
+                'opportunities': opp_counts,
+                'trades_executed': len(executed_trades)
+            }
+            
+            self.telegram.send_trading_cycle_log(cycle_info)
+            
+            # 거래 기회가 발견되었을 때 즉시 알림
+            for strategy, opportunities_list in opportunities.items():
+                for opp in opportunities_list[:2]:  # 최대 2개까지만
+                    if opp.get('confidence', 0) > 0.7:  # 신뢰도 70% 이상
+                        opp_info = {
+                            'strategy': strategy,
+                            'symbol': opp.get('symbol', 'N/A'),
+                            'confidence': opp.get('confidence', 0),
+                            'expected_return': opp.get('expected_profit', opp.get('expected_return', 0))
+                        }
+                        self.telegram.send_opportunity_alert(opp_info)
+            
+        except Exception as e:
+            self.logger.error(f"사이클 로그 전송 실패: {e}")
+    
+    def _send_performance_log(self):
+        """성과 로그 전송"""
+        try:
+            portfolio_state = self.portfolio_manager.get_portfolio_summary()
+            
+            # 시간별 성과 계산
+            current_time = datetime.now()
+            hour_ago = current_time - timedelta(hours=1)
+            
+            hourly_stats = self.db.get_trading_statistics_period(hour_ago, current_time)
+            
+            performance_info = {
+                'current_balance': portfolio_state.get('total_balance', 0),
+                'hourly_pnl': hourly_stats.get('total_pnl', 0),
+                'hourly_pnl_pct': hourly_stats.get('pnl_percentage', 0),
+                'total_trades': self.performance_metrics['total_trades'],
+                'win_rate': self.performance_metrics['win_rate']
+            }
+            
+            self.telegram.send_performance_log(performance_info)
+            
+        except Exception as e:
+            self.logger.error(f"성과 로그 전송 실패: {e}")
+    
+    def _send_market_analysis_log(self, market_data: Dict[str, Any]):
+        """시장 분석 로그 전송"""
+        try:
+            # 시장 상황 분석
+            bullish_signals = 0
+            bearish_signals = 0
+            total_signals = 0
+            top_signals = []
+            
+            for symbol, data in market_data.items():
+                spot_signals = data.get('spot_signals', {})
+                futures_signals = data.get('futures_signals', {})
+                
+                if spot_signals and futures_signals:
+                    spot_strength = spot_signals.get('combined_signal', 0)
+                    futures_strength = futures_signals.get('combined_signal', 0)
+                    
+                    if spot_strength and futures_strength:
+                        avg_strength = (spot_strength + futures_strength) / 2
+                        
+                        if avg_strength > 0.3:
+                            bullish_signals += 1
+                        elif avg_strength < -0.3:
+                            bearish_signals += 1
+                        
+                        total_signals += 1
+                        
+                        if abs(avg_strength) > 0.5:
+                            top_signals.append({
+                                'symbol': symbol,
+                                'strategy': 'trend_following',
+                                'confidence': abs(avg_strength)
+                            })
+            
+            # 시장 상황 판단
+            if total_signals > 0:
+                bullish_ratio = bullish_signals / total_signals
+                bearish_ratio = bearish_signals / total_signals
+                
+                if bullish_ratio > 0.6:
+                    market_condition = 'bullish'
+                elif bearish_ratio > 0.6:
+                    market_condition = 'bearish'
+                elif abs(bullish_ratio - bearish_ratio) < 0.2:
+                    market_condition = 'neutral'
+                else:
+                    market_condition = 'volatile'
+            else:
+                market_condition = 'neutral'
+            
+            # 상위 신호 정렬
+            top_signals.sort(key=lambda x: x['confidence'], reverse=True)
+            
+            analysis_info = {
+                'symbols_analyzed': len(market_data),
+                'top_signals': top_signals[:3],
+                'market_condition': market_condition
+            }
+            
+            self.telegram.send_market_analysis_log(analysis_info)
+            
+        except Exception as e:
+            self.logger.error(f"시장 분석 로그 전송 실패: {e}")
+    
     async def run_trading_cycle(self):
         """거래 사이클 실행"""
         try:
@@ -465,10 +603,29 @@ class HybridTradingBotV2:
             self.logger.info(f"사이클 #{self.cycle_count} 완료: {cycle_duration:.2f}초, "
                            f"거래 {len(executed_trades)}개 실행")
             
+            # 6. 실시간 거래 사이클 로그 전송 (매 사이클마다)
+            self._send_cycle_log(market_data, executed_trades, cycle_duration)
+            
+            # 7. 시장 분석 로그 전송 (10사이클마다, 약 10분마다)
+            if self.cycle_count % 10 == 0:
+                self._send_market_analysis_log(market_data)
+            
+            # 8. 성과 로그 전송 (30분마다, 사이클 30개마다)  
+            if self.cycle_count % 30 == 0:
+                self._send_performance_log()
+            
         except Exception as e:
             self.logger.error(f"거래 사이클 실행 실패: {e}")
             
-            # 오류 알림
+            # 오류 로그 전송
+            error_info = {
+                'type': 'trading_cycle_error',
+                'message': str(e)[:200],
+                'severity': 'high'
+            }
+            self.telegram.send_error_log(error_info)
+            
+            # 기존 리스크 알림도 유지
             error_alert = {
                 'type': 'system_error',
                 'symbol': 'SYSTEM',

@@ -26,10 +26,10 @@ class HybridPortfolioStrategy:
         self.spot_allocation = config.get('spot_allocation', 0.6)  # 현물 60%
         self.futures_allocation = config.get('futures_allocation', 0.4)  # 선물 40%
         
-        # 전략 설정 (수익률 최적화)
-        self.arbitrage_threshold = config.get('arbitrage_threshold', 0.001)  # 0.1% 프리미엄 (더 민감하게)
-        self.rebalance_threshold = config.get('rebalance_threshold', 0.03)  # 3% 편차시 리밸런싱 (더 빈번하게)
-        self.max_leverage = config.get('max_leverage', 5)  # 최대 5배 레버리지 (수익률 증대)
+        # 전략 설정 (매우 적극적 거래를 위한 초 민감 설정)
+        self.arbitrage_threshold = config.get('arbitrage_threshold', 0.0005)  # 0.05% 프리미엄 (초민감)
+        self.rebalance_threshold = config.get('rebalance_threshold', 0.03)  # 3% 편차시 리밸런싱
+        self.max_leverage = config.get('max_leverage', 5)  # 최대 5배 레버리지
         
         # 리스크 관리
         self.max_position_size = config.get('max_position_size', 0.2)  # 단일 포지션 최대 20%
@@ -39,6 +39,26 @@ class HybridPortfolioStrategy:
         self.current_positions = {'spot': {}, 'futures': {}}
         self.portfolio_history = []
         self.last_rebalance = datetime.now()
+        
+        # 선물 거래 지원 심볼 (바이낸스 기준)
+        self.futures_supported_symbols = [
+            'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 
+            'SOL/USDT', 'ADA/USDT', 'AVAX/USDT', 'LINK/USDT', 
+            'TRX/USDT'  # LTC, DOT, MATIC 제외
+        ]
+        
+        # 현물 심볼 -> 선물 심볼 매핑
+        self.futures_symbol_mapping = {
+            'BTC/USDT': 'BTCUSDT',
+            'ETH/USDT': 'ETHUSDT', 
+            'BNB/USDT': 'BNBUSDT',
+            'XRP/USDT': 'XRPUSDT',
+            'SOL/USDT': 'SOLUSDT',
+            'ADA/USDT': 'ADAUSDT',
+            'AVAX/USDT': 'AVAXUSDT',
+            'LINK/USDT': 'LINKUSDT',
+            'TRX/USDT': 'TRXUSDT'
+        }
         
         logger.info("하이브리드 포트폴리오 전략 초기화 완료")
     
@@ -118,8 +138,8 @@ class HybridPortfolioStrategy:
                         spot_strength = 0
                         futures_strength = 0
                     
-                    # 현물과 선물 신호가 같은 방향이면 트렌드 추종 (더 민감하게)
-                    if abs(spot_strength) > 0.2 and abs(futures_strength) > 0.2:
+                    # 현물과 선물 신호가 같은 방향이면 트렌드 추종 (매우 민감하게)
+                    if abs(spot_strength) > 0.1 and abs(futures_strength) > 0.1:
                         if (spot_strength > 0 and futures_strength > 0) or (spot_strength < 0 and futures_strength < 0):
                             opportunities['trend_following'].append({
                                 'symbol': symbol,
@@ -129,11 +149,11 @@ class HybridPortfolioStrategy:
                                 'confidence': (abs(spot_strength) + abs(futures_strength)) / 2
                             })
                 
-                # 3. 헤징 기회 (현물 보유시 선물로 헤지) - 더 민감하게
+                # 3. 헤징 기회 (현물 보유시 선물로 헤지) - 매우 민감하게
                 current_spot_position = self.current_positions['spot'].get(symbol, {})
-                if current_spot_position and abs(futures_strength) > 0.3:
-                    if (current_spot_position.get('side') == 'buy' and futures_strength < -0.3) or \
-                       (current_spot_position.get('side') == 'sell' and futures_strength > 0.3):
+                if current_spot_position and abs(futures_strength) > 0.2:
+                    if (current_spot_position.get('side') == 'buy' and futures_strength < -0.2) or \
+                       (current_spot_position.get('side') == 'sell' and futures_strength > 0.2):
                         opportunities['hedging'].append({
                             'symbol': symbol,
                             'hedge_type': 'protective_short' if current_spot_position.get('side') == 'buy' else 'protective_long',
@@ -163,8 +183,8 @@ class HybridPortfolioStrategy:
                         spot_rsi = 50
                         futures_rsi = 50
                     
-                    # RSI 극값에서 모멘텀 기회 (더 민감하게)
-                    if (spot_rsi < 35 and futures_rsi < 35) or (spot_rsi > 65 and futures_rsi > 65):
+                    # RSI 극값에서 모멘텀 기회 (매우 민감하게)
+                    if (spot_rsi < 40 and futures_rsi < 40) or (spot_rsi > 60 and futures_rsi > 60):
                         opportunities['momentum'].append({
                             'symbol': symbol,
                             'type': 'oversold_bounce' if spot_rsi < 30 else 'overbought_correction',
@@ -180,99 +200,177 @@ class HybridPortfolioStrategy:
             return {'arbitrage': [], 'trend_following': [], 'hedging': [], 'momentum': []}
     
     def generate_portfolio_signals(self, opportunities: Dict[str, Any], 
-                                 portfolio_state: Dict[str, Any]) -> List[Dict[str, Any]]:
+                                 portfolio_state: Dict[str, Any], 
+                                 market_data: Dict[str, Any] = None) -> List[Dict[str, Any]]:
         """포트폴리오 전략 신호 생성"""
         try:
             signals = []
-            current_balance = portfolio_state.get('total_balance', 0)
-            spot_balance = current_balance * self.spot_allocation
-            futures_balance = current_balance * self.futures_allocation
+            
+            # 실제 사용 가능한 잔고 사용
+            spot_free_balance = portfolio_state.get('spot_free_balance', 0)
+            futures_free_balance = portfolio_state.get('futures_free_balance', 0)
+            
+            logger.info(f"사용 가능한 잔고 - 현물: ${spot_free_balance:.2f}, 선물: ${futures_free_balance:.2f}")
+            
+            # 잔고가 부족하면 신호 생성 중단
+            if spot_free_balance < 10 and futures_free_balance < 10:  # 최소 $10 필요
+                logger.warning("거래 가능한 잔고가 부족합니다")
+                return []
             
             # 1. 아비트라지 신호 (최우선)
-            for arb in sorted(opportunities['arbitrage'], key=lambda x: x['expected_profit'], reverse=True):
-                if arb['confidence'] > 0.7:
-                    position_size = min(spot_balance * 0.3, futures_balance * 0.3)  # 30%까지
+            arbitrage_opportunities = opportunities.get('arbitrage', [])
+            logger.info(f"아비트라지 기회 분석: {len(arbitrage_opportunities)}개 발견")
+            
+            for i, arb in enumerate(sorted(arbitrage_opportunities, key=lambda x: x['expected_profit'], reverse=True)):
+                logger.info(f"아비트라지 #{i+1}: {arb['symbol']} - 신뢰도: {arb['confidence']:.3f}, 수익률: {arb['expected_profit']:.4f}")
+                
+                if arb['confidence'] > 0.3:
+                    # 사용 가능한 잔고의 5%만 사용 (보수적)
+                    max_spot_amount = spot_free_balance * 0.05
+                    max_futures_amount = futures_free_balance * 0.05
                     
-                    if arb['opportunity_type'] == 'long_spot_short_futures':
-                        signals.extend([
-                            {
-                                'strategy': 'arbitrage',
-                                'symbol': arb['symbol'],
-                                'exchange_type': 'spot',
-                                'action': 'buy',
-                                'size': position_size / arb['spot_price'],
-                                'confidence': arb['confidence'],
-                                'expected_return': arb['expected_profit'],
-                                'priority': 1
-                            },
-                            {
-                                'strategy': 'arbitrage',
-                                'symbol': arb['symbol'],
-                                'exchange_type': 'futures',
-                                'action': 'sell',
-                                'size': position_size / arb['futures_price'],
-                                'confidence': arb['confidence'],
-                                'expected_return': arb['expected_profit'],
-                                'priority': 1
-                            }
-                        ])
+                    logger.debug(f"계산된 투자 금액 - 현물: ${max_spot_amount:.2f}, 선물: ${max_futures_amount:.2f}")
+                    
+                    # 최소 거래 금액 확인 ($20 이상)
+                    min_trade_amount = 20.0
+                    if max_spot_amount < min_trade_amount and max_futures_amount < min_trade_amount:
+                        logger.warning(f"투자 금액 부족으로 스킵: {arb['symbol']} - 필요: ${min_trade_amount}, 가능: ${max(max_spot_amount, max_futures_amount):.2f}")
+                        continue
+                    
+                    # 실제 거래 가능한 수량 계산 (최소 정밀도 준수)
+                    spot_quantity = self._calculate_safe_quantity(arb['symbol'], max_spot_amount, arb['spot_price'], 'spot')
+                    futures_quantity = self._calculate_safe_quantity(arb['symbol'], max_futures_amount, arb['futures_price'], 'futures')
+                    
+                    logger.debug(f"계산된 수량 - 현물: {spot_quantity:.6f}, 선물: {futures_quantity:.6f}")
+                    
+                    # 수량이 0이면 거래 불가
+                    if spot_quantity <= 0 or futures_quantity <= 0:
+                        logger.warning(f"수량 부족으로 아비트라지 기회 스킵: {arb['symbol']} - 현물: {spot_quantity:.6f}, 선물: {futures_quantity:.6f}")
+                        continue
+                    
+                    logger.info(f"아비트라지 신호 생성 중: {arb['symbol']} - 현물: {spot_quantity:.6f}, 선물: {futures_quantity:.6f}")
+                else:
+                    logger.debug(f"신뢰도 부족으로 스킵: {arb['symbol']} - 신뢰도: {arb['confidence']:.3f} < 0.3")
+                    
+                    # 선물 지원 여부 확인
+                    if arb['symbol'] in self.futures_supported_symbols:
+                        futures_symbol = self.futures_symbol_mapping.get(arb['symbol'], arb['symbol'])
+                        
+                        if arb['opportunity_type'] == 'long_spot_short_futures':
+                            signals.extend([
+                                {
+                                    'strategy': 'arbitrage',
+                                    'symbol': arb['symbol'],
+                                    'exchange_type': 'spot',
+                                    'action': 'buy',
+                                    'size': spot_quantity,
+                                    'confidence': arb['confidence'],
+                                    'expected_return': arb['expected_profit'],
+                                    'priority': 1
+                                },
+                                {
+                                    'strategy': 'arbitrage',
+                                    'symbol': futures_symbol,  # 올바른 선물 심볼 사용
+                                    'exchange_type': 'futures',
+                                    'action': 'sell',
+                                    'size': futures_quantity,
+                                    'confidence': arb['confidence'],
+                                    'expected_return': arb['expected_profit'],
+                                    'priority': 1
+                                }
+                            ])
+                        else:
+                            signals.extend([
+                                {
+                                    'strategy': 'arbitrage',
+                                    'symbol': arb['symbol'],
+                                    'exchange_type': 'spot',
+                                    'action': 'sell',
+                                    'size': spot_quantity,
+                                    'confidence': arb['confidence'],
+                                    'expected_return': arb['expected_profit'],
+                                    'priority': 1
+                                },
+                                {
+                                    'strategy': 'arbitrage',
+                                    'symbol': futures_symbol,  # 올바른 선물 심볼 사용
+                                    'exchange_type': 'futures',
+                                    'action': 'buy',
+                                    'size': futures_quantity,
+                                    'confidence': arb['confidence'],
+                                    'expected_return': arb['expected_profit'],
+                                    'priority': 1
+                                }
+                            ])
                     else:
-                        signals.extend([
-                            {
-                                'strategy': 'arbitrage',
-                                'symbol': arb['symbol'],
-                                'exchange_type': 'spot',
-                                'action': 'sell',
-                                'size': position_size / arb['spot_price'],
-                                'confidence': arb['confidence'],
-                                'expected_return': arb['expected_profit'],
-                                'priority': 1
-                            },
-                            {
-                                'strategy': 'arbitrage',
-                                'symbol': arb['symbol'],
-                                'exchange_type': 'futures',
-                                'action': 'buy',
-                                'size': position_size / arb['futures_price'],
-                                'confidence': arb['confidence'],
-                                'expected_return': arb['expected_profit'],
-                                'priority': 1
-                            }
-                        ])
+                        # 선물 지원 안되면 현물만
+                        signals.append({
+                            'strategy': 'arbitrage_spot_only',
+                            'symbol': arb['symbol'],
+                            'exchange_type': 'spot',
+                            'action': 'buy' if arb['opportunity_type'] == 'long_spot_short_futures' else 'sell',
+                            'size': spot_quantity,
+                            'confidence': arb['confidence'],
+                            'expected_return': arb['expected_profit'],
+                            'priority': 1
+                        })
             
             # 2. 트렌드 추종 신호
             for trend in sorted(opportunities['trend_following'], key=lambda x: x['confidence'], reverse=True):
-                if trend['confidence'] > 0.6:
-                    # 현물은 주요 포지션, 선물은 레버리지 활용
-                    spot_size = spot_balance * 0.2 / portfolio_state.get('avg_price', {}).get(trend['symbol'], 1)
-                    futures_size = futures_balance * 0.3 / portfolio_state.get('avg_price', {}).get(trend['symbol'], 1)
+                if trend['confidence'] > 0.3:
+                    # 현재 가격 가져오기
+                    symbol_data = market_data.get(trend['symbol'], {}) if market_data else {}
+                    spot_price = symbol_data.get('spot_ticker', {}).get('last', 0)
+                    futures_price = symbol_data.get('futures_ticker', {}).get('last', 0)
+                    
+                    if spot_price <= 0 or futures_price <= 0:
+                        logger.warning(f"가격 정보 부족으로 트렌드 신호 스킵: {trend['symbol']}")
+                        continue
+                    
+                    # 사용 가능한 잔고의 3%만 사용 (더 보수적)
+                    max_spot_amount = spot_free_balance * 0.03
+                    max_futures_amount = futures_free_balance * 0.03
+                    
+                    # 최소 거래 금액 확인
+                    min_trade_amount = 15.0
+                    if max_spot_amount < min_trade_amount and max_futures_amount < min_trade_amount:
+                        continue
+                    
+                    spot_size = self._calculate_safe_quantity(trend['symbol'], max_spot_amount, spot_price, 'spot')
+                    futures_size = self._calculate_safe_quantity(trend['symbol'], max_futures_amount, futures_price, 'futures')
+                    
+                    if spot_size <= 0:
+                        continue
                     
                     action = 'buy' if trend['direction'] == 'bullish' else 'sell'
                     
-                    signals.extend([
-                        {
+                    # 현물 신호는 항상 추가
+                    signals.append({
+                        'strategy': 'trend_following',
+                        'symbol': trend['symbol'],
+                        'exchange_type': 'spot',
+                        'action': action,
+                        'size': spot_size,
+                        'confidence': trend['confidence'],
+                        'priority': 2
+                    })
+                    
+                    # 선물 지원 시에만 선물 신호 추가
+                    if trend['symbol'] in self.futures_supported_symbols and futures_size > 0:
+                        futures_symbol = self.futures_symbol_mapping.get(trend['symbol'], trend['symbol'])
+                        signals.append({
                             'strategy': 'trend_following',
-                            'symbol': trend['symbol'],
-                            'exchange_type': 'spot',
-                            'action': action,
-                            'size': spot_size,
-                            'confidence': trend['confidence'],
-                            'priority': 2
-                        },
-                        {
-                            'strategy': 'trend_following',
-                            'symbol': trend['symbol'],
+                            'symbol': futures_symbol,  # 올바른 선물 심볼 사용
                             'exchange_type': 'futures',
                             'action': action,
-                            'size': futures_size * min(self.max_leverage, 2),  # 2배 레버리지
+                            'size': futures_size,
                             'confidence': trend['confidence'],
                             'priority': 2
-                        }
-                    ])
+                        })
             
             # 3. 헤징 신호
             for hedge in opportunities['hedging']:
-                if hedge['confidence'] > 0.7:
+                if hedge['confidence'] > 0.4:
                     spot_position = hedge['spot_position']
                     hedge_size = spot_position.get('size', 0) * 0.8  # 80% 헤지
                     
@@ -290,42 +388,62 @@ class HybridPortfolioStrategy:
             
             # 4. 모멘텀 신호 (소규모)
             for momentum in sorted(opportunities['momentum'], key=lambda x: x['confidence'], reverse=True):
-                if momentum['confidence'] > 0.8:
-                    momentum_size = min(spot_balance, futures_balance) * 0.1  # 10%만
+                if momentum['confidence'] > 0.5:
+                    # 현재 가격 가져오기
+                    symbol_data = market_data.get(momentum['symbol'], {}) if market_data else {}
+                    current_price = symbol_data.get('spot_ticker', {}).get('last', 0)
+                    
+                    if current_price <= 0:
+                        continue
+                    
+                    # 가용 잔고의 2%만 사용 (매우 보수적)
+                    max_momentum_amount = min(spot_free_balance, futures_free_balance) * 0.02
+                    
+                    if max_momentum_amount < 10:  # 최소 $10
+                        continue
                     
                     if momentum['type'] == 'oversold_bounce':
                         # 과매도 반등 기대 - 롱 포지션
-                        signals.extend([
-                            {
+                        spot_quantity = self._calculate_safe_quantity(momentum['symbol'], max_momentum_amount, current_price, 'spot')
+                        futures_quantity = self._calculate_safe_quantity(momentum['symbol'], max_momentum_amount, current_price, 'futures')
+                        
+                        if spot_quantity > 0:
+                            signals.append({
                                 'strategy': 'momentum',
                                 'symbol': momentum['symbol'],
                                 'exchange_type': 'spot',
                                 'action': 'buy',
-                                'size': momentum_size / portfolio_state.get('avg_price', {}).get(momentum['symbol'], 1),
+                                'size': spot_quantity,
                                 'confidence': momentum['confidence'],
                                 'priority': 4
-                            },
-                            {
+                            })
+                        
+                        if futures_quantity > 0 and momentum['symbol'] in self.futures_supported_symbols:
+                            futures_symbol = self.futures_symbol_mapping.get(momentum['symbol'], momentum['symbol'])
+                            signals.append({
                                 'strategy': 'momentum',
-                                'symbol': momentum['symbol'],
+                                'symbol': futures_symbol,  # 올바른 선물 심볼 사용
                                 'exchange_type': 'futures',
                                 'action': 'buy',
-                                'size': momentum_size * 1.5 / portfolio_state.get('avg_price', {}).get(momentum['symbol'], 1),
+                                'size': futures_quantity,
                                 'confidence': momentum['confidence'],
                                 'priority': 4
-                            }
-                        ])
+                            })
                     else:
-                        # 과매수 조정 기대 - 숏 포지션
-                        signals.append({
-                            'strategy': 'momentum',
-                            'symbol': momentum['symbol'],
-                            'exchange_type': 'futures',
-                            'action': 'sell',
-                            'size': momentum_size * 2 / portfolio_state.get('avg_price', {}).get(momentum['symbol'], 1),
-                            'confidence': momentum['confidence'],
-                            'priority': 4
-                        })
+                        # 과매수 조정 기대 - 숏 포지션 (선물만)
+                        if momentum['symbol'] in self.futures_supported_symbols:
+                            futures_quantity = self._calculate_safe_quantity(momentum['symbol'], max_momentum_amount, current_price, 'futures')
+                            if futures_quantity > 0:
+                                futures_symbol = self.futures_symbol_mapping.get(momentum['symbol'], momentum['symbol'])
+                                signals.append({
+                                    'strategy': 'momentum',
+                                    'symbol': futures_symbol,  # 올바른 선물 심볼 사용
+                                    'exchange_type': 'futures',
+                                    'action': 'sell',
+                                    'size': futures_quantity,
+                                    'confidence': momentum['confidence'],
+                                    'priority': 4
+                                })
             
             # 우선순위별 정렬
             signals.sort(key=lambda x: x['priority'])
@@ -380,73 +498,66 @@ class HybridPortfolioStrategy:
             current_spot_value = portfolio_state.get('spot_balance', 0)
             current_futures_value = portfolio_state.get('futures_balance', 0)
             
+            # 최소 잔고 확인 ($100 이하면 리밸런싱 스킵)
+            if total_balance < 100:
+                logger.info(f"잔고가 너무 적어 리밸런싱 스킵: ${total_balance:.2f}")
+                return []
+            
             target_spot_value = total_balance * self.spot_allocation
             target_futures_value = total_balance * self.futures_allocation
             
             spot_adjustment = target_spot_value - current_spot_value
             futures_adjustment = target_futures_value - current_futures_value
             
-            # 현물 조정
-            if abs(spot_adjustment) > total_balance * 0.01:  # 1% 이상 차이
-                main_symbol = 'BTC/USDT'  # 메인 심볼로 조정
-                current_price = portfolio_state.get('current_prices', {}).get(main_symbol, 0)
-                
-                if current_price > 0:
-                    if spot_adjustment > 0:
-                        # 현물 매수 필요
-                        orders.append({
-                            'strategy': 'rebalancing',
-                            'symbol': main_symbol,
-                            'exchange_type': 'spot',
-                            'action': 'buy',
-                            'size': abs(spot_adjustment) / current_price,
-                            'confidence': 1.0,
-                            'priority': 0  # 최우선
-                        })
-                    else:
-                        # 현물 매도 필요
-                        orders.append({
-                            'strategy': 'rebalancing',
-                            'symbol': main_symbol,
-                            'exchange_type': 'spot',
-                            'action': 'sell',
-                            'size': abs(spot_adjustment) / current_price,
-                            'confidence': 1.0,
-                            'priority': 0
-                        })
+            # 최소 조정 금액 설정 ($20 이상)
+            min_adjustment_amount = 20.0
             
-            # 선물 조정
-            if abs(futures_adjustment) > total_balance * 0.01:
+            # 현물 조정
+            if abs(spot_adjustment) > min_adjustment_amount:
                 main_symbol = 'BTC/USDT'
                 current_price = portfolio_state.get('current_prices', {}).get(main_symbol, 0)
                 
                 if current_price > 0:
-                    if futures_adjustment > 0:
-                        # 선물 매수 필요
+                    # 안전한 수량 계산 사용
+                    safe_quantity = self._calculate_safe_quantity(main_symbol, abs(spot_adjustment), current_price, 'spot')
+                    
+                    if safe_quantity > 0:
+                        action = 'buy' if spot_adjustment > 0 else 'sell'
                         orders.append({
                             'strategy': 'rebalancing',
                             'symbol': main_symbol,
-                            'exchange_type': 'futures',
-                            'action': 'buy',
-                            'size': abs(futures_adjustment) / current_price,
-                            'confidence': 1.0,
-                            'priority': 0
-                        })
-                    else:
-                        # 선물 매도 필요
-                        orders.append({
-                            'strategy': 'rebalancing',
-                            'symbol': main_symbol,
-                            'exchange_type': 'futures',
-                            'action': 'sell',
-                            'size': abs(futures_adjustment) / current_price,
+                            'exchange_type': 'spot',
+                            'action': action,
+                            'size': safe_quantity,
                             'confidence': 1.0,
                             'priority': 0
                         })
             
+            # 선물 조정 - 일시적으로 비활성화 (선물 심볼 문제 해결 후 재활성화)
+            # if abs(futures_adjustment) > min_adjustment_amount:
+            #     main_symbol = 'BTCUSDT'  # 선물은 다른 형식
+            #     current_price = portfolio_state.get('current_prices', {}).get('BTC/USDT', 0)
+            #     
+            #     if current_price > 0:
+            #         safe_quantity = self._calculate_safe_quantity('BTC/USDT', abs(futures_adjustment), current_price, 'futures')
+            #         
+            #         if safe_quantity > 0:
+            #             action = 'buy' if futures_adjustment > 0 else 'sell'
+            #             orders.append({
+            #                 'strategy': 'rebalancing',
+            #                 'symbol': main_symbol,
+            #                 'exchange_type': 'futures',
+            #                 'action': action,
+            #                 'size': safe_quantity,
+            #                 'confidence': 1.0,
+            #                 'priority': 0
+            #             })
+            
             if orders:
                 self.last_rebalance = datetime.now()
                 logger.info(f"리밸런싱 주문 생성: {len(orders)}개")
+            else:
+                logger.info("리밸런싱 필요하지만 안전한 수량 계산 불가로 스킵")
             
             return orders
             
@@ -508,6 +619,70 @@ class HybridPortfolioStrategy:
         except Exception as e:
             logger.error(f"포지션 제거 실패: {e}")
     
+    def _calculate_safe_quantity(self, symbol: str, max_amount: float, price: float, exchange_type: str) -> float:
+        """안전한 거래 수량 계산 (최소 정밀도 및 거래 금액 준수)"""
+        try:
+            if price <= 0 or max_amount <= 0:
+                return 0.0
+            
+            # 심볼별 최소 거래 수량 설정 (바이낸스 기준)
+            min_quantities = {
+                'BTC/USDT': 0.00001,   # 0.00001 BTC
+                'ETH/USDT': 0.0001,    # 0.0001 ETH
+                'BNB/USDT': 0.001,     # 0.001 BNB
+                'XRP/USDT': 0.1,       # 0.1 XRP
+                'SOL/USDT': 0.001,     # 0.001 SOL
+                'ADA/USDT': 0.1,       # 0.1 ADA
+                'AVAX/USDT': 0.01,     # 0.01 AVAX
+                'LINK/USDT': 0.01,     # 0.01 LINK
+                'DOT/USDT': 0.01,      # 0.01 DOT
+                'MATIC/USDT': 0.1,     # 0.1 MATIC
+                'TRX/USDT': 1.0        # 1.0 TRX
+            }
+            
+            # 최소 거래 금액 (바이낸스는 보통 $10)
+            min_notional = 10.0
+            
+            # 기본 최소 수량
+            min_quantity = min_quantities.get(symbol, 0.001)
+            
+            # 가격 기준 최대 구매 가능 수량
+            max_quantity = max_amount / price
+            
+            # 최소 수량 확인
+            if max_quantity < min_quantity:
+                logger.debug(f"최소 수량 미달: {symbol} - 필요: {min_quantity}, 가능: {max_quantity:.6f}")
+                return 0.0
+            
+            # 최소 거래 금액 확인
+            calculated_notional = max_quantity * price
+            if calculated_notional < min_notional:
+                logger.debug(f"최소 거래 금액 미달: {symbol} - 필요: ${min_notional}, 가능: ${calculated_notional:.2f}")
+                return 0.0
+            
+            # 안전한 수량 계산 (최소 수량의 정수배로 반올림)
+            safe_quantity = max(min_quantity, max_quantity)
+            
+            # 정밀도 조정 (소수점 자릿수 제한)
+            if symbol in ['BTC/USDT']:
+                safe_quantity = round(safe_quantity, 5)
+            elif symbol in ['ETH/USDT', 'BNB/USDT', 'SOL/USDT']:
+                safe_quantity = round(safe_quantity, 4)
+            elif symbol in ['AVAX/USDT', 'LINK/USDT', 'DOT/USDT']:
+                safe_quantity = round(safe_quantity, 3)
+            elif symbol in ['ADA/USDT', 'XRP/USDT', 'MATIC/USDT']:
+                safe_quantity = round(safe_quantity, 2)
+            else:
+                safe_quantity = round(safe_quantity, 3)
+            
+            logger.debug(f"수량 계산 완료: {symbol} - 금액: ${max_amount:.2f}, 가격: ${price:.4f}, 수량: {safe_quantity:.6f}")
+            
+            return safe_quantity
+            
+        except Exception as e:
+            logger.error(f"안전한 수량 계산 실패 ({symbol}): {e}")
+            return 0.0
+
     def get_strategy_summary(self) -> Dict[str, Any]:
         """전략 요약 정보 반환"""
         return {

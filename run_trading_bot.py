@@ -4,7 +4,6 @@
 """
 
 import sys
-import os
 import asyncio
 from pathlib import Path
 
@@ -18,54 +17,23 @@ def main():
     print("=" * 50)
     
     print("\n실행 옵션을 선택하세요:")
-    print("1. 기본 트레이딩 봇 (모듈화 버전)")
-    print("2. 비동기 최적화 트레이딩 봇")
-    print("3. 하이브리드 포트폴리오 봇 v2 (현물+선물)")
-    print("4. 모니터링 대시보드만 실행")
-    print("5. 단위 테스트 실행")
-    print("6. 데이터베이스 테스트")
+    print("1. 하이브리드 포트폴리오 봇 v2 (현물+선물) 🎯")
+    print("2. 모니터링 대시보드만 실행")
+    print("3. 단위 테스트 실행")
+    print("4. 데이터베이스 테스트")
     
-    choice = input("\n선택 (1-6): ").strip()
+    choice = input("\n선택 (1-4): ").strip()
     
     if choice == "1":
-        run_basic_bot()
-    elif choice == "2":
-        run_async_bot()
-    elif choice == "3":
         run_hybrid_bot_v2()
-    elif choice == "4":
+    elif choice == "2":
         run_dashboard()
-    elif choice == "5":
+    elif choice == "3":
         run_tests()
-    elif choice == "6":
+    elif choice == "4":
         run_database_test()
     else:
-        print("잘못된 선택입니다.")
-
-def run_basic_bot():
-    """기본 트레이딩 봇 실행"""
-    print("\n🤖 기본 트레이딩 봇 실행 중...")
-    try:
-        # run_modular.py가 없으면 기본 run.py 사용
-        if os.path.exists("run_modular.py"):
-            from run_modular import main as modular_main
-            modular_main()
-        elif os.path.exists("run.py"):
-            import subprocess
-            subprocess.run([sys.executable, "run.py"])
-        else:
-            print("❌ 실행할 메인 파일을 찾을 수 없습니다.")
-    except Exception as e:
-        print(f"❌ 기본 봇 실행 실패: {e}")
-
-def run_async_bot():
-    """비동기 트레이딩 봇 실행"""
-    print("\n⚡ 비동기 최적화 트레이딩 봇 실행 중...")
-    try:
-        from modules.async_trading_bot import main as async_main
-        asyncio.run(async_main())
-    except Exception as e:
-        print(f"❌ 비동기 봇 실행 실패: {e}")
+        print("❌ 잘못된 선택입니다. 1-4 사이의 숫자를 입력하세요.")
 
 def run_hybrid_bot_v2():
     """하이브리드 포트폴리오 봇 v2 실행"""
